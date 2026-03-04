@@ -4,65 +4,61 @@
 ---
 
 ## 中文说明
-本项目包含用于与 Swabian TimeTagger 设备进行交互、优化过度的高性能 Python 脚本，主要针对量子通信（Quantum CC）实验与符合计数（Coincidence Counting）应用场景开发。原始代码受限于单线程瓶颈与底层阵列重分配问题，现已完成深度的多线程与架构重构。
+本软件为量子通信实验与符合计数（Coincidence Counting）提供了一个基于 PyQt5 的功能完整、直观的可视化界面。该程序主要用于控制 Swabian Instruments TimeTagger 系列硬件外设，并进行高精度的时间标签采集与分析。
 
-### ✨ 核心功能与提升
-- **异步多线程存盘 (Async File I/O)**: 彻底消除了原始版本在周期结束、保存数据到硬盘时引发的 UI 界面死机与卡顿问题，所有文件读写均已转移至后台 `ThreadPoolExecutor` 线程池执行。
-- **线程访问安全 (Thread Safety)**: 在 UI 参数配置和后台高频数据采集线程之间加入了原生的线程锁（`threading.Lock`）保护，彻底防止多线程资源抢占导致的数据读写错误。
-- **完善的交互式 UI**: 
-    - 引入直观的 **Save Directory**（保存目录）独立选择器（支持点击浏览目录）。
-    - 开放了 **Auto Search** 自动寻峰的全局阈值调整参数，极大提升复杂底噪环境下的寻峰成功率。
-    - **双通道设备联动**: 在 2TDC 版本中解锁了针对设备序列号（Serial Number）的直接文本编辑与重连功能。
-- **内存防泄漏优化**: 消灭了高频（每 0.1 秒刷新）的坐标轴矩阵重建行为。不仅解决了旧有的内存泄漏（Memory Leak）隐患，连带根除了由于 Python 频繁执行垃圾回收（GC）而引发的规律性掉帧现象。
+### 核心功能
+- **实时符合直方图 (Real-time Coincidence Histogram)**: 允许用户自由设定 Start 通道与 Stop 通道，动态调节 Bin 精度与 Window 观测窗口宽窄，并实时显示两者之间差值的符合计数直方分布图。
+- **动态延时配置 (Delay Calibration)**: 支持在 UI 上直接为特定 Stop 信号增加纳秒 (ns) 级别的延时补偿，用于校准光路、光纤或电缆导致的时间差。
+- **自动寻峰 (Auto Search)**: 提供一键“自动寻峰”功能，在大范围的时间窗口中自动搜索真实的符合峰值，并根据高斯/阈值特征提取峰值位置，自动将计算出的延时偏差回填给当前通道。
+- **灵活的设备扩展 (1TDC / 2TDC)**: 支持在同一个界面内操控单台 TDC，或联动两台独立的 TDC 设备，允许跨设备设定符合逻辑（比如使用 TDC-A 的 CH1 做 Start，TDC-B 的 CH3 做 Stop），支持物理 PPS 同步。
+- **设备速率监控**: UI 主界面内置实时的单光子计数率监控表（kHz），方便随时调整实验光压与耦合效率。
+- **自动化采集循环 (Automated Acquisition)**: 具备 `Free Run` (自由监视)、`Single Shot` (单次采集) 与 `Repeated` (自动化批量循坏采集) 几种工作模式。在批量模式下，用户可自定义每一轮的积分时长 (Duration) 以及循环计数。每次积分完成后，软件会在后台静默将直方数据写入存储目录的 `.txt` 文件内供后续数据拟合与处理。
 
 ### 📦 安装指引
 1. **环境准备**: 
-   - 推荐安装 [Miniconda](https://docs.conda.io/en/latest/miniconda.html) 或 Anaconda 以隔离环境。
-   - 核心依赖基于 Python 3.8+。
+   - 依赖 Python 3.8 或以上环境（推荐使用 [Miniconda](https://docs.conda.io/en/latest/miniconda.html)）。
 2. **驱动安装**:
-   - 必须在系统中提前安装 **Swabian Instruments TimeTagger** 官方驱动平台，并确保 Python API 环境配置正确。
+   - 必须在系统中提前安装 **Swabian Instruments TimeTagger** 官方驱动平台，并确保 Python API 环境配置关联正确。
 3. **安装依赖**:
    ```bash
    pip install PyQt5 pyqtgraph numpy scipy
    ```
 4. **运行程序**:
-   - 针对单台设备：直接运行 `ui timestamp 1TDC folder.py`
-   - 针对双设备同频：运行 `ui timetamp 2TDC folder.py`
-   - 后期数据拟合：运行 `Data Processing.py`
+   - 针对单台设备控制：直接运行 `ui timestamp 1TDC folder.py`
+   - 针对双设备同频控制：运行 `ui timetamp 2TDC folder.py`
+   - 采集后期的批量拟合与分析：运行 `Data Processing.py`
 
-### ⚠️ 注意事项与必读
-- **关于编译后的 EXE**: 如果您曾使用 Pyinstaller 对本项目进行了 EXE 独立程序打包，请注意生成的二进制执行程序通常在 700MB 上下，本代码仓库的 `.gitignore` 已经默认屏蔽了 `dist/` 和 `build/` 环境以防止云端 LFS 溢出。**请不要将生成的 executable 强制推送到仓库中**。
-- **设备连接错误**: 若 UI 显示 `TimeTagger Library Missing`，请检查您的驱动层 API 是否已成功并入当前 Python 环境的环境变量中。
+### ⚠️ 注意事项
+- **关于编译后的 EXE**: 如果您使用 Pyinstaller 对本项目进行 EXE 独立程序打包，请注意生成的执行程序通常在 700MB 左右（因为附带了科学计算包），此时本代码仓库的 `.gitignore` 已经默认屏蔽了相关打包目录。**请不要将生成的 executable 文件强制推送到远端仓库中**。
+- **设备连接错误**: 若初次打开时提示 `TimeTagger Library Missing`，说明您的 Python 解释器尚未找到 Swabian 的底层驱动 API，请检查环境变量和安装路径是否正确。
 
 ---
 
 ## English Description
-This repository contains heavily optimized Python scripts for interacting with Swabian TimeTagger devices, developed primarily for quantum communication experiments and coincidence counting workflows. The code originally suffered from single-threading performance limits but has been significantly refactored.
+This software provides a fully-featured, intuitive visualization interface based on PyQt5 for controlling Swabian Instruments TimeTagger hardware devices and acquiring continuous time-tagging data specifically tailored for quantum communication and coincidence counting experiments.
 
-### ✨ Features
-- **Multithreading for File I/O**: Eliminates application stuttering during the end-of-cycle data saving by offloading disk operations to `ThreadPoolExecutor` workers.
-- **Thread Safety Configuration**: Incorporates native thread lock protections bridging the gap between Data Acquisition threads and UI manipulation, preventing data scrambling.
-- **Improved UI and Adjustments**: 
-    - Flexible Directory Save Selection via UI browser.
-    - Customizable **Auto Search** peak threshold configurations directly via UI.
-    - In-place Serial Number updates for dynamic TDC switching routines.
-- **Memory Enhancements**: Removes high-frequency Axis regeneration, resolving memory leaks and periodic GC UI stutters. Allows rapid data handling across heavy coincidence setups.
+### Core Features
+- **Real-time Coincidence Histogram**: Enables users to assign Start and Stop channels flexibly. You can dynamically adjust the Histogram's "Bin" resolution and "Window" range to acquire real-time counts depicting timing correlation distribution structures.
+- **Dynamic Delay Configuration**: Allows setting manual nanosecond-level delays (offsets) targeted at specific stop channels. Perfect for calibrating time differences caused by unmatching optical paths, fiber spools, or electronic cable lengths.
+- **Auto Search Feature**: Pinpoints the actual true coincidence peak across a sweeping wide time window via a single click. It extracts the peak alignment mathematically and intelligently auto-fills the offset value to match.
+- **1TDC / 2TDC Scalability**: Offers code configurations that work natively down to a single TDC setup, while accommodating an entangled dual-TDC interconnected architecture (Allowing a Start input from TDC-A's CH1 cross-correlated with TDC-B's CH3) relying on PPS synchronization logic.
+- **Channel Rate Monitoring**: Embedded multi-channel frequency monitoring metric (kHz) natively in the UI to seamlessly inspect and regulate the underlying experimental optical coupling setup.
+- **Automated Acquisition Cycles**: Harnesses multi-tiered operational regimes: `Free Run` (live observation), `Single Shot`, and `Repeated` batching. Batch mode allows customized repetitive integration spans (`Duration`) linked tightly with automated silent saving capabilities. Data is periodically output to `.txt` files containing histograms cleanly formatted for posterior data fitting tools.
 
 ### 📦 Installation Guide
 1. **Environment Setup**: 
-   - Use of [Miniconda](https://docs.conda.io/en/latest/miniconda.html) or Anaconda is highly recommended for creating an isolated Python environment.
-   - Requires Python 3.8 or above.
+   - Python 3.8+ is strictly required. (Utilization of an isolated [Miniconda](https://docs.conda.io/en/latest/miniconda.html) environment is heavily advocated).
 2. **Hardware Drivers**:
-   - You MUST have the official **Swabian Instruments TimeTagger** driver suite correctly installed, and the Python API must be accessible within your environment vars.
+   - You MUST have the official **Swabian Instruments TimeTagger** driver suite correctly deployed, mapped, and accessible within your native system dependencies.
 3. **Python Dependencies**:
    ```bash
    pip install PyQt5 pyqtgraph numpy scipy
    ```
 4. **Execution**:
-   - For single-TDC setups: run `ui timestamp 1TDC folder.py`
-   - For dual-TDC setups: run `ui timetamp 2TDC folder.py`
-   - For mathematical curve fitting: run `Data Processing.py`
+   - For single-TDC setups: Invoke `ui timestamp 1TDC folder.py`
+   - For interdependent dual-TDC hardware flows: Initiate `ui timetamp 2TDC folder.py`
+   - To undergo batch mathematical operations tracking acquired data: Deploy `Data Processing.py`
 
-### ⚠️ Important Notes
-- **Compiled Executables (EXE)**: If you compile these modules into standalone executables using Pyinstaller, the resulting bundle often reaches ~700MB. The `.gitignore` by default blocks `dist/` and `build/` to prevent violating GitHub's standard LFS limits. **Do not force push EXE objects to this repository.**
-- **Connection Diagnostics**: If the UI throws a `TimeTagger Library Missing` error upon connecting, please verify the Swabian TimeTagger installation path and Python hooking integrations.
+### ⚠️ Precautions
+- **Compiled Executables (EXE)**: Should you endeavor to compile these modules into standalone executables relying on `Pyinstaller`, keep in mind the bundle will weigh near ~700MB. The incorporated `.gitignore` implicitly omits standard build directories (`dist/` and `build/`). **Do not force push EXE binaries back payload into this git repository.**
+- **Connection Checks**: In cases where the UI raises a `TimeTagger Library Missing` message box, reconsider revising the Swabian TimeTagger core installations. Ensure its Python interconnects are placed into the active operating environment configuration.
