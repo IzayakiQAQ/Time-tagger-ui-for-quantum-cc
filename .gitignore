@@ -1,0 +1,20 @@
+# Compiled Executables
+dist/
+build/
+*.spec
+
+# Python Caches
+__pycache__/
+*.py[cod]
+*$py.class
+
+# IDE and OS
+.vscode/
+.idea/
+.DS_Store
+*.swp
+
+# Local Environment
+.env
+venv/
+env/
