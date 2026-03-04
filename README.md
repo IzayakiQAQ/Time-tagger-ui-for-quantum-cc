@@ -14,7 +14,7 @@
 - **设备速率监控**: UI 主界面内置实时的单光子计数率监控表（kHz），方便随时调整实验光压与耦合效率。
 - **自动化采集循环 (Automated Acquisition)**: 具备 `Free Run` (自由监视)、`Single Shot` (单次采集) 与 `Repeated` (自动化批量循坏采集) 几种工作模式。在批量模式下，用户可自定义每一轮的积分时长 (Duration) 以及循环计数。每次积分完成后，软件会在后台静默将直方数据写入存储目录的 `.txt` 文件内供后续数据拟合与处理。
 
-### 📦 安装指引
+### 安装指引
 1. **环境准备**: 
    - 依赖 Python 3.8 或以上环境（推荐使用 [Miniconda](https://docs.conda.io/en/latest/miniconda.html)）。
 2. **驱动安装**:
