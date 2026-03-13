@@ -26,7 +26,15 @@
 4. **运行程序**:
    - 针对单台设备控制：直接运行 `ui timestamp 1TDC folder.py`
    - 针对双设备同频控制：运行 `ui timetamp 2TDC folder.py`
-   - 采集后期的批量拟合与分析：运行 `Data Processing.py`
+   - **异地 WLAN 分布式符合与双开控制**: 请进入 `Virtual Host/` 文件夹。首先在发射端运行 `NodeA_Transmitter.py` 开辟数据发流服务器，随后在主控端打开带有网络融合引擎支持的 `WLAN_NodeB_Central_UI.py` 进行跨物理地域的时间戳拉取。
+   - 采集后期的批量拟合与分析：运行 `Data Processing.py`，如需将多组 1 秒数据聚合成 10 秒以瘦身，可运行 `data_merger.py`。
+   
+### 📡 特别功能：Virtual Host 无线分布式符合系统 (WLAN D-TDC)
+本项目独创地解决了相距几公里外（通过 WiFi/微波局域网）的两台独立 TDC，进行皮秒级同步符合的难题。由于普通的 WLAN 环境常常带有几十到上百毫秒的延迟与严重抖动，使得微观时间的对齐成为不可能。本架构通过“硬件注入，软件补时”策略完美攻克了该瓶颈：
+
+1. **绝对时间轴重构**: 两台异地 TDC 背板必须各自打入独立的 GPS高精度 **10MHz** （保证快慢一致）以及物理的 **1 PPS** 时钟基准信号（锚定宏观开机时间）。
+2. **边缘节点 (Transmitter)**: 发射端仅仅通过套接字挂载流（占用宽带极高，单路需 8Bytes/s，总上限建议不超过无线网支持的 2.5 MHz / 160 Mbps 带宽上限）。
+3. **超级虚拟 1TDC (Central UI)**: 本地中心在拉取网络流后激活核心算法（`Synchronizer`），利用各自标记的 1 PPS 通道信息在内存中执行宏观移位，将巨量延迟造成的偏置在底层完全抹平并将其透明地“融合拼装”为了一个巨大的 1TDC，并交接给这套最成熟的 Auto Search UI 层进行一键绘图处理。
 
 ### ⚠️ 注意事项
 - **关于编译后的 EXE**: 如果您使用 Pyinstaller 对本项目进行 EXE 独立程序打包，请注意生成的执行程序通常在 700MB 左右（因为附带了科学计算包），此时本代码仓库的 `.gitignore` 已经默认屏蔽了相关打包目录。**请不要将生成的 executable 文件强制推送到远端仓库中**。
@@ -57,7 +65,15 @@ This software provides a fully-featured, intuitive visualization interface based
 4. **Execution**:
    - For single-TDC setups: Invoke `ui timestamp 1TDC folder.py`
    - For interdependent dual-TDC hardware flows: Initiate `ui timetamp 2TDC folder.py`
-   - To undergo batch mathematical operations tracking acquired data: Deploy `Data Processing.py`
+   - **Long-Distance WLAN Distributed Coincidence**: Navigate to `Virtual Host/`. Invoke `NodeA_Transmitter.py` on the remote edge payload establishing a stream server. Then launch `WLAN_NodeB_Central_UI.py` on the analyst side to harvest remote tags and construct a virtual unified time interface.
+   - To undergo batch mathematical operations tracking acquired data: Deploy `Data Processing.py` or compile massive filesets rapidly using `data_merger.py`.
+   
+### 📡 Spotlight: Virtual Host WLAN Distributed Coincidence (WLAN D-TDC)
+This toolkit inherently resolves the profound inability to match exact timestaps originating from completely isolated TDCs located miles apart connected strictly through flaky WLAN/microwave jumps. It conquers massive jitter profiles (often >100ms) typically lethal to correlation calculus:
+
+1. **Hardware-Anchored Time Recreations**: TDCs on both ends must be physically injected with external high-precision **10MHz** frequencies (harmonizing tagger clock speeds) and a solitary **1 PPS** synchronization beat (anchoring epoch relativity). 
+2. **The Transmitter (Edge Node)**: Only serves to blast absolute serialized byte-structures across TCP (Beware: each photon occupies 8B payload. Network capping is usually reached at around 2.5-3 MHz counts generating ~160Mbps of actual WiFi strain).
+3. **Virtual Super 1-TDC (Central UI)**: Pulls the network stream concurrently feeding it towards an embedded `Synchronizer` engine. Supplying it the specific injected 1 PPS input channels, the subsystem conducts real-time algorithmic translation, brutally forcing immense delay jitters into a zero-offset uniform timeline. It magically masks isolated WLAN devices to appear functionally as a massive singular 1TDC instance to our pre-exisiting UI pipelines rendering auto-search sweeps natively applicable.
 
 ### ⚠️ Precautions
 - **Compiled Executables (EXE)**: Should you endeavor to compile these modules into standalone executables relying on `Pyinstaller`, keep in mind the bundle will weigh near ~700MB. The incorporated `.gitignore` implicitly omits standard build directories (`dist/` and `build/`). **Do not force push EXE binaries back payload into this git repository.**
