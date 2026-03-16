@@ -4,77 +4,83 @@
 ---
 
 ## 中文说明
-本软件为量子通信实验与符合计数（Coincidence Counting）提供了一个基于 PyQt5 的功能完整、直观的可视化界面。该程序主要用于控制 Swabian Instruments TimeTagger 系列硬件外设，并进行高精度的时间标签采集与分析。
+本程序是基于 PyQt5 构建的软硬件控制界面，专为控制 Swabian Instruments TimeTagger 系列设备并提取符合计数（Coincidence Counting）直方图设计。程序提供图形界面、动态参数调节、延迟寻峰以及自动循环采集存储功能。
 
-### 核心功能
-- **实时符合直方图 (Real-time Coincidence Histogram)**: 允许用户自由设定 Start 通道与 Stop 通道，动态调节 Bin 精度与 Window 观测窗口宽窄，并实时显示两者之间差值的符合计数直方分布图。
-- **动态延时配置 (Delay Calibration)**: 支持在 UI 上直接为特定 Stop 信号增加纳秒 (ns) 级别的延时补偿，用于校准光路、光纤或电缆导致的时间差。
-- **自动寻峰 (Auto Search)**: 提供一键“自动寻峰”功能，在大范围的时间窗口中自动搜索真实的符合峰值，并根据高斯/阈值特征提取峰值位置，自动将计算出的延时偏差回填给当前通道。
-- **灵活的设备扩展 (1TDC / 2TDC)**: 支持在同一个界面内操控单台 TDC，或联动两台独立的 TDC 设备，允许跨设备设定符合逻辑（比如使用 TDC-A 的 CH1 做 Start，TDC-B 的 CH3 做 Stop），支持物理 PPS 同步。
-- **设备速率监控**: UI 主界面内置实时的单光子计数率监控表（kHz），方便随时调整实验光压与耦合效率。
-- **自动化采集循环 (Automated Acquisition)**: 具备 `Free Run` (自由监视)、`Single Shot` (单次采集) 与 `Repeated` (自动化批量循坏采集) 几种工作模式。在批量模式下，用户可自定义每一轮的积分时长 (Duration) 以及循环计数。每次积分完成后，软件会在后台静默将直方数据写入存储目录的 `.txt` 文件内供后续数据拟合与处理。
+### UI 界面参数与按键说明
+**1. 硬件连接区域**
+- **Serial 输入框**: 填入本地对应硬件的序列号（如 2137000NDZ）。
+- **Remote IP / Port (仅限分布式版本)**: 填入局域网内作为数据发射节点的另一台 Tagger 所在电脑的 IP 地址及其开放的 TCP 端口（默认 4444）。
+- **Connect Devices / Connect WLAN Node**: 初始化操作。尝试读取输入的配置并在底层激活设备底层时间戳数据流。建立连接后方可解开后续控制按钮的锁定状态。
 
-### 安装指引
-1. **环境准备**: 
-   - 依赖 Python 3.8 或以上环境（推荐使用 [Miniconda](https://docs.conda.io/en/latest/miniconda.html)）。
-2. **驱动安装**:
-   - 必须在系统中提前安装 **Swabian Instruments TimeTagger** 官方驱动平台，并确保 Python API 环境配置关联正确。
-3. **安装依赖**:
-   ```bash
-   pip install PyQt5 pyqtgraph numpy scipy
-   ```
-4. **运行程序**:
-   - 针对单台设备控制：直接运行 `ui timestamp 1TDC folder.py`
-   - 针对双设备同频控制：运行 `ui timetamp 2TDC folder.py`
-   - **异地 WLAN 分布式符合与双开控制**: 请进入 `Virtual Host/` 文件夹。首先在发射端运行 `NodeA_Transmitter.py` 开辟数据发流服务器，随后在主控端打开带有网络融合引擎支持的 `WLAN_NodeB_Central_UI.py` 进行跨物理地域的时间戳拉取。
-   - 采集后期的批量拟合与分析：运行 `Data Processing.py`，如需将多组 1 秒数据聚合成 10 秒以瘦身，可运行 `data_merger.py`。
-   
-### 📡 特别功能：Virtual Host 无线分布式符合系统 (WLAN D-TDC)
-本项目独创地解决了相距几公里外（通过 WiFi/微波局域网）的两台独立 TDC，进行皮秒级同步符合的难题。由于普通的 WLAN 环境常常带有几十到上百毫秒的延迟与严重抖动，使得微观时间的对齐成为不可能。本架构通过“硬件注入，软件补时”策略完美攻克了该瓶颈：
+**2. 核心控制与全局采集参数**
+- **START / STOP**: 采集引擎主控开关。按下 START 开始将底层物理事件提取并计算为符合信息，曲线开始刷新；按下 STOP 命令底层缓冲池停止推送并切断硬件连结刷新任务。
+- **采集模式单选钮**: 
+  - `Free Run`: 图表无限刷新，不将产生的数据落地存储。
+  - `Single Shot`: 根据限定的总时长进行一次积分扫描，数据不存储，多用于手动观察。
+  - `Repeated`: 重复批处理模式。启用后按设定时长为单位生成指定数量的积分直方图文件，并顺序编号保存至外部存储器。
+- **Save Dir (Browse)**: 弹出本地文件浏览器，用于指定 `Repeated` 模式时每次积分文件产生的最终写入目录路径。
+- **Duration (s)**: 设置单词积分计算所需要经历的具体物理时长（秒）。
+- **Cycles (Max)**: 设定 `Repeated` 模式下需要产生的目标离线数据文件总数上限。
+- **Bin (ps)**: 设置直方图 X 轴的单个数据柱宽度（皮秒）。该数值越小则显示分辨率越高，但信噪比越受硬件物理抖动影响。
+- **Window (ps)**: 设置直方图 X 轴的探测总宽度（单边，皮秒）。即系统将在 `[-Window, +Window]` 的时间差范围内收集统计两个光子的到达差距。
 
-1. **绝对时间轴重构**: 两台异地 TDC 背板必须各自打入独立的 GPS高精度 **10MHz** （保证快慢一致）以及物理的 **1 PPS** 时钟基准信号（锚定宏观开机时间）。
-2. **边缘节点 (Transmitter)**: 发射端仅仅通过套接字挂载流（占用宽带极高，单路需 8Bytes/s，总上限建议不超过无线网支持的 2.5 MHz / 160 Mbps 带宽上限）。
-3. **超级虚拟 1TDC (Central UI)**: 本地中心在拉取网络流后激活核心算法（`Synchronizer`），利用各自标记的 1 PPS 通道信息在内存中执行宏观移位，将巨量延迟造成的偏置在底层完全抹平并将其透明地“融合拼装”为了一个巨大的 1TDC，并交接给这套最成熟的 Auto Search UI 层进行一键绘图处理。
+**3. 符合通道与延迟校准管理 (Link 1 / Link 2)**
+- **Start Dev / Start CH**: 下拉框选项与数字微调器组合。设定作为绝对时间戳 0 点标记的（Start）物理触发信号来源于哪一台硬件（TDC A 还是 B）以及具体的输入数字通道序号（1-8）。
+- **Stop Dev / Stop CH**: 设定发生关联停止计算逻辑的符合（Stop）物理触发信号的硬件来源及对应数字通道序号。
+- **Delay (ns)**: 纳秒级的手动时间偏置量。该数值可为负数，逻辑效果等同于软件强行在 Stop 光子到达时间上加减固定偏移量，用于补偿光纤距离引起的物理线延迟差。
+- **Auto Search**: 自动寻峰按钮。系统自动读取当前 `[-Window, +Window]` 内已收集的直方图统计量，根据高斯加权分布寻找到具备最高计数值的时间差坐标位置，并根据该偏移值计算出实际偏差 ns 数，自动将其补偿回 `Delay (ns)` 控制框中。
+- **Search Thresh**: 寻峰算法触发敏感度乘数（默认为 5，即寻找高于均值背景 5 倍的数据点作为有效关联峰）。
 
-### ⚠️ 注意事项
-- **关于编译后的 EXE**: 如果您使用 Pyinstaller 对本项目进行 EXE 独立程序打包，请注意生成的执行程序通常在 700MB 左右（因为附带了科学计算包），此时本代码仓库的 `.gitignore` 已经默认屏蔽了相关打包目录。**请不要将生成的 executable 文件强制推送到远端仓库中**。
-- **设备连接错误**: 若初次打开时提示 `TimeTagger Library Missing`，说明您的 Python 解释器尚未找到 Swabian 的底层驱动 API，请检查环境变量和安装路径是否正确。
+### 部署与运行模式
+1. **依赖环境**: 需备好 Python 3.8+ 及安装系统级的官方 Swabian Instruments API。在终端内安装依赖模块 `pip install PyQt5 pyqtgraph numpy scipy`。
+2. **常规本地运行**:
+   - 若本地只接载一台控制设备（仅依赖内部通道）：运行 `ui timestamp 1TDC folder.py`。
+   - 若本地物理接载两台独立控制设备（共 16 物理路）：运行 `ui timetamp 2TDC folder.py`。
+3. **WLAN 异地分布式联合控制 (Virtual Host)**:
+   - 依赖位于同一局域网下的两端电脑。两地硬件必须均独立外接相同的绝对参考系信号（即 10MHz 时钟和 1PPS 秒脉冲同步源）。
+   - 在远程“盲”节点 A 处启动 `Virtual Host/NodeA_Transmitter.py`，暴露内网流服务。
+   - 在监控本地节点 B 处启动 `Virtual Host/WLAN_NodeB_Central_UI.py`，根据界面填入 IP 及 PPS 同步物理通道，程序在后台启用 `Synchronizer` 修正极大网络延迟与时基错乱，逻辑表现形式跟双台本地直连控制无异。
+4. **数据批量压缩处理**:
+   - 后期离线时可通过执行 `data_merger.py` 以多进程方式自动扫描指定目录，将产生于 1 秒周期的历史海量数据每 10 秒合并缩编一次以便长期归档。
 
 ---
 
 ## English Description
-This software provides a fully-featured, intuitive visualization interface based on PyQt5 for controlling Swabian Instruments TimeTagger hardware devices and acquiring continuous time-tagging data specifically tailored for quantum communication and coincidence counting experiments.
+This software provides an operational environment based on PyQt5 for interpreting data generated by hardware components from the Swabian Instruments TimeTagger families. It facilitates manual interaction, automated batch collection loops, peak detection offsets, and histogram creation.
 
-### Core Features
-- **Real-time Coincidence Histogram**: Enables users to assign Start and Stop channels flexibly. You can dynamically adjust the Histogram's "Bin" resolution and "Window" range to acquire real-time counts depicting timing correlation distribution structures.
-- **Dynamic Delay Configuration**: Allows setting manual nanosecond-level delays (offsets) targeted at specific stop channels. Perfect for calibrating time differences caused by unmatching optical paths, fiber spools, or electronic cable lengths.
-- **Auto Search Feature**: Pinpoints the actual true coincidence peak across a sweeping wide time window via a single click. It extracts the peak alignment mathematically and intelligently auto-fills the offset value to match.
-- **1TDC / 2TDC Scalability**: Offers code configurations that work natively down to a single TDC setup, while accommodating an entangled dual-TDC interconnected architecture (Allowing a Start input from TDC-A's CH1 cross-correlated with TDC-B's CH3) relying on PPS synchronization logic.
-- **Channel Rate Monitoring**: Embedded multi-channel frequency monitoring metric (kHz) natively in the UI to seamlessly inspect and regulate the underlying experimental optical coupling setup.
-- **Automated Acquisition Cycles**: Harnesses multi-tiered operational regimes: `Free Run` (live observation), `Single Shot`, and `Repeated` batching. Batch mode allows customized repetitive integration spans (`Duration`) linked tightly with automated silent saving capabilities. Data is periodically output to `.txt` files containing histograms cleanly formatted for posterior data fitting tools.
+### UI Element & Parameter Reference
+**1. Hardware Invocation Framework**
+- **Serial Parameter Textbox**: Target local hardware equipment identifying serial designation.
+- **Remote IP / Port (Distributed Network Build Only)**: The local LAN address of the edge data streaming companion node serving as Swabian Server. (Standardized port: 4444).
+- **Connect Devices / Connect WLAN Node**: The initializing push-button. Commences connection procedures using loaded configurations, reserving low-level buffer flows. Successful verification acts as an unlock key to subsequent software execution tasks.
 
-### 📦 Installation Guide
-1. **Environment Setup**: 
-   - Python 3.8+ is strictly required. (Utilization of an isolated [Miniconda](https://docs.conda.io/en/latest/miniconda.html) environment is heavily advocated).
-2. **Hardware Drivers**:
-   - You MUST have the official **Swabian Instruments TimeTagger** driver suite correctly deployed, mapped, and accessible within your native system dependencies.
-3. **Python Dependencies**:
-   ```bash
-   pip install PyQt5 pyqtgraph numpy scipy
-   ```
-4. **Execution**:
-   - For single-TDC setups: Invoke `ui timestamp 1TDC folder.py`
-   - For interdependent dual-TDC hardware flows: Initiate `ui timetamp 2TDC folder.py`
-   - **Long-Distance WLAN Distributed Coincidence**: Navigate to `Virtual Host/`. Invoke `NodeA_Transmitter.py` on the remote edge payload establishing a stream server. Then launch `WLAN_NodeB_Central_UI.py` on the analyst side to harvest remote tags and construct a virtual unified time interface.
-   - To undergo batch mathematical operations tracking acquired data: Deploy `Data Processing.py` or compile massive filesets rapidly using `data_merger.py`.
-   
-### 📡 Spotlight: Virtual Host WLAN Distributed Coincidence (WLAN D-TDC)
-This toolkit inherently resolves the profound inability to match exact timestaps originating from completely isolated TDCs located miles apart connected strictly through flaky WLAN/microwave jumps. It conquers massive jitter profiles (often >100ms) typically lethal to correlation calculus:
+**2. Acquisition Controls and Global Scoping**
+- **START / STOP**: Direct trigger constraints for logic retrieval. START invokes continuous polling from backend sub-process queues, executing real-time graphic render routines. STOP initiates a halting interrupt command causing rendering streams to gracefully pause and reset cycle iterators over time.
+- **Operation Mode Toggles**: 
+  - `Free Run`: Activates uninterrupted, transient screen plot observation preventing local disc saving.
+  - `Single Shot`: Conducts exactly one iteration integration span according to preset Duration, avoiding programmatic repetition or saving schedules.
+  - `Repeated`: The standard data-acquisition method. Generates systematic sequence captures corresponding roughly to cycle variables while archiving integrated distributions into files silently.
+- **Save Dir (Browse)**: Initiates system directory browser allowing assignment of an absolute structural tree folder pathway allocated to offline histogram text file dumping. 
+- **Duration (s)**: Decimal numerical value assigning absolute temporal integration exposure lengths bound equivalently to integration physics intervals. 
+- **Cycles (Max)**: Defines a theoretical maximum sequence iterations permitted throughout consecutive `Repeated` logging actions.
+- **Bin (ps)**: Establishes plotting precision along Histogram horizontal spaces equating to absolute calculation widths. Smaller parameters force denser plotting with associated susceptibility mapping towards general system noise bounds.
+- **Window (ps)**: Maps out target coincidence extraction logic bounding thresholds (unilateral limit parameter applied positively/negatively around origin bounds).
 
-1. **Hardware-Anchored Time Recreations**: TDCs on both ends must be physically injected with external high-precision **10MHz** frequencies (harmonizing tagger clock speeds) and a solitary **1 PPS** synchronization beat (anchoring epoch relativity). 
-2. **The Transmitter (Edge Node)**: Only serves to blast absolute serialized byte-structures across TCP (Beware: each photon occupies 8B payload. Network capping is usually reached at around 2.5-3 MHz counts generating ~160Mbps of actual WiFi strain).
-3. **Virtual Super 1-TDC (Central UI)**: Pulls the network stream concurrently feeding it towards an embedded `Synchronizer` engine. Supplying it the specific injected 1 PPS input channels, the subsystem conducts real-time algorithmic translation, brutally forcing immense delay jitters into a zero-offset uniform timeline. It magically masks isolated WLAN devices to appear functionally as a massive singular 1TDC instance to our pre-exisiting UI pipelines rendering auto-search sweeps natively applicable.
+**3. Coincidence Channels and Offset Callibration**
+- **Start Dev / Start CH**: Assortments linking triggering start markers toward originating distinct equipment boundaries mapped towards individual hardware signal input 1-8 logic matrices.
+- **Stop Dev / Stop CH**: Terminating endpoint counterpart hardware device association parameters bounding cross-relational logic matching arrays.
+- **Delay (ns)**: Additive numeric modifications mapped strictly onto secondary endpoints enforcing post-generation logic translation algorithms simulating identical length cable parameters. Takes positive and negative values.
+- **Auto Search**: Analytic command executing instantaneous algorithmic sweeps locating highest occurrence concentration areas within mapped boundaries. Calculates explicit center discrepancies via normalized distribution comparisons mapping resultant offset value into matching structural Delay elements autonomously.
+- **Search Thresh**: Threshold algorithmic multiplier establishing deviation boundaries classifying true signal concentrations distinct from normal operational baseline averages. 
 
-### ⚠️ Precautions
-- **Compiled Executables (EXE)**: Should you endeavor to compile these modules into standalone executables relying on `Pyinstaller`, keep in mind the bundle will weigh near ~700MB. The incorporated `.gitignore` implicitly omits standard build directories (`dist/` and `build/`). **Do not force push EXE binaries back payload into this git repository.**
-- **Connection Checks**: In cases where the UI raises a `TimeTagger Library Missing` message box, reconsider revising the Swabian TimeTagger core installations. Ensure its Python interconnects are placed into the active operating environment configuration.
+### Implementation Sequences
+1. **Requirements Setup**: Software dictates Python API integration referencing absolute root Swabian drivers matching Python >3.8 environment deployments alongside specific packages standardly installed via `pip install PyQt5 pyqtgraph numpy scipy`. 
+2. **Conventional Execution**:
+   - Confined singular hardware topology: Initiate `ui timestamp 1TDC folder.py`.
+   - Congruent twin-equipment local topology bridging identical operational environments: Employs `ui timetamp 2TDC folder.py`.
+3. **Decentralized WLAN Topology (Virtual Host Protocol)**:
+   - Prescribes identical independent reference timelines (External 10MHz Clock plus discrete 1 PPS) bounded concurrently across isolated geography LAN boundaries.
+   - Remote Node executes stream exposure mechanics explicitly operating solely through `Virtual Host/NodeA_Transmitter.py`.
+   - Data consolidation and observation instance triggers via `Virtual Host/WLAN_NodeB_Central_UI.py`, routing networking sockets via backend `Synchronizer` mechanics effectively overriding substantial transport layer latency jitter.
+4. **Offline Processing Utiliites**:
+   - Facilitate data compilation by executing standardly bundled routines such as `data_merger.py` combining 1-second capture blocks recursively across batches extending logical sequence structures mapping 10-second archives effectively trimming large operational filesystem capacities recursively utilizing multi-core constraints.
