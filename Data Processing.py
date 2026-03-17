@@ -9,7 +9,7 @@ from tqdm import tqdm
 
 # ================= 配置区域 =================
 
-DATA_DIR = r"E:\lzy\2026.3.5 0km 2m单边"
+DATA_DIR = r"E:\lzy\2026.3.13 2000k 25km"
 OUTPUT_FILENAME = "clock_diff_filled.csv"
 
 # 拟合参数
@@ -63,19 +63,18 @@ def process_single_file_fast(filepath):
         p0 = [min_y, peak_x, FIT_WIDTH_GUESS, peak_y - min_y]
 
         bounds = (
-            [0, np.min(x_fit) - 100, 10, 0],
-            [np.max(y) * 1.5, np.max(x_fit) + 100, 10000, np.inf]
+            [0, np.min(x_fit), 10, 0],
+            [np.max(y) * 1.5, np.max(x_fit), 10000, np.inf]
         )
 
         try:
             popt, _ = curve_fit(gaussian, x_fit, y_fit, p0=p0, bounds=bounds, maxfev=1000)
             return popt[1]
         except RuntimeError:
-            return np.nan
+            return None
 
-    except Exception as e:
-        print(f"Error processing {filepath}: {e}")
-        return np.nan
+    except Exception:
+        return None
 
 
 def process_cycle_pair(cycle_id, file_pair):
@@ -83,19 +82,19 @@ def process_cycle_pair(cycle_id, file_pair):
     path2 = file_pair.get('link2')
 
     # 初始化默认值
-    val1 = np.nan
-    val2 = np.nan
+    val1 = 0.0
+    val2 = 0.0
 
     # 尝试处理 Link 1
     if path1:
         res1 = process_single_file_fast(path1)
-        if res1 is not None and not np.isnan(res1):
+        if res1 is not None:
             val1 = res1
 
     # 尝试处理 Link 2
     if path2:
         res2 = process_single_file_fast(path2)
-        if res2 is not None and not np.isnan(res2):
+        if res2 is not None:
             val2 = res2
 
     correction = (val1 - val2) / 2.0
@@ -156,38 +155,20 @@ def main():
         results.sort(key=lambda x: x['Cycle'])
         df = pd.DataFrame(results)
 
-        valid_df = df.dropna(subset=['Clock_Correction_ps'])
-        if not valid_df.empty:
-            # ==== 新增异常数据点修正 ====
-            # 根据中位数拉回偏离过10ps的异常数据，确保拟合时序连续不畸变
-            median_val = valid_df['Clock_Correction_ps'].median()
-            threshold = 10.0
-            
-            is_outlier = np.abs(df['Clock_Correction_ps'] - median_val) > threshold
-            outliers_count = is_outlier.sum()
-            
-            if outliers_count > 0:
-                print(f"\n警告：检测到 {outliers_count} 个大幅偏离(>{threshold}ps)的异常数据点！")
-                print(f"正在强行将异常点修正回正常有效边界内（[ {median_val-threshold:.2f}, {median_val+threshold:.2f} ]）...")
-                df['Clock_Correction_ps'] = np.clip(
-                    df['Clock_Correction_ps'], 
-                    median_val - threshold, 
-                    median_val + threshold
-                )
-            
-            std_dev = df['Clock_Correction_ps'].std()
-            print(f"Non-null Std Dev (修正后/Final): {std_dev:.4f} ps")
-        else:
-            print("Warning: All results are invalid (NaN).")
-
         output_path = os.path.join(DATA_DIR, OUTPUT_FILENAME)
         df.to_csv(output_path, index=False, float_format='%.4f')
         print(f"\nDone! {len(df)} records saved to {output_path}")
 
+        valid_df = df[df['Clock_Correction_ps'] != 0]
+        if not valid_df.empty:
+            std_dev = valid_df['Clock_Correction_ps'].std()
+            print(f"Non-zero Std Dev: {std_dev:.4f} ps")
+        else:
+            print("Warning: All results are zero.")
+
     else:
         print("No cycles found.")
 
-    input("Press Enter to exit...")
 
 if __name__ == "__main__":
     main()

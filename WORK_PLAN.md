@@ -1,21 +1,32 @@
-# WORK_PLAN
+# WORK_PLAN.md
 
 ## Current Objective
-The user requested uploading the current project version to GitHub and rewriting the `README.md` to be a comprehensive, objective, and detailed instruction manual. The new manual must explain how to use the software, detailing every part and button. It must avoid useless adjectives and icons/emojis.
+检查并修复 `WLAN_NodeB_Central_UI.py` 中的连接逻辑。目前代码使用的是 `createTimeTagger(serial)`，这通常用于本地 USB 连接，需要修改以支持通过 IP:Port 连接到远程 Transmitter。
+
+---
 
 ## Diagnosis / Analysis
-1. The current `README.md` contains emojis and marketing-style descriptions (e.g., "Spotlight", "Magically masks").
-2. The user needs a technical, dry, and precise manual explaining UI elements (e.g., Start, Stop, Auto Search, Delay, Save Dir, bin/win settings, Tagger IP inputs).
-3. The project currently has multiple modes: 1TDC, 2TDC, and Virtual Host WLAN D-TDC. All need to be documented objectively.
-4. Git commit and push is required post-documentation.
+1. **现状**：`HardwareInterface.initialize` 中直接调用 `Swabian.TimeTagger.createTimeTagger(serial_a)`。
+2. **问题**：如果 `serial_a` 是一个 IP 地址（例如 `192.168.1.100:4444`），普通的 `createTimeTagger` 可能无法正确识别为网络连接，或者在某些版本中需要显式调用 `createTimeTaggerNetwork`。
+3. **需求**：发射端 `NodeA_Transmitter.py` 使用了 `tagger.startServer(4444)`，接收端（UI端）必须能够连接到这个地址。
+
+---
 
 ## Proposed Code Changes
-1. **`README.md`**: Completely rewrite.
-   - Remove all emojis.
-   - Use a structured, objective tone.
-   - Add a detailed "User Interface Manual" section for both single/dual machines and the Virtual Host setup.
-   - Explain buttons: `Connect Devices`, `START/STOP`, `Auto Search`, `Bin`, `Window`, `Save Params`.
-2. **Git**:
-   - `git add README.md`
-   - `git commit -m "docs: rewrite README as an objective detailed instruction manual"`
-   - `git push`
+
+### 文件：`WLAN_NodeB_Central_UI.py`
+
+#### 1. 修改 `HardwareInterface.initialize()`
+- 增加逻辑：判断输入的字符串是否包含 `:`（IP:Port 格式）。
+- 如果包含 `:`，调用 `Swabian.TimeTagger.createTimeTaggerNetwork(address)`。
+- 如果不包含，保持 `Swabian.TimeTagger.createTimeTagger(serial)`。
+
+#### 2. 更新 UI 默认值和标签
+- 将 UI 上的 "Serial" 标签改为 "Serial / IP:Port"。
+- 默认值可以设为一个示例 IP，方便用户测试。
+
+---
+
+## Results
+- [x] 分析完成：确认当前代码确实缺乏显式的网络连接逻辑。
+- [ ] 代码修改完成。

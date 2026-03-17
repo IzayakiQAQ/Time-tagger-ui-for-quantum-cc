@@ -46,9 +46,32 @@ class HardwareInterface:
 
     def initialize(self, serial_a, serial_b):
         if Swabian.TimeTagger is None: return False, "TimeTagger Library Missing"
+        
+        def create_tagger(input_str):
+            if not input_str: return None
+            # 判断是否为网络地址 (含有冒号，如 192.168.1.100:4444)
+            if ":" in input_str:
+                print(f"正在尝试网络连接至: {input_str}")
+                return Swabian.TimeTagger.createTimeTaggerNetwork(input_str)
+            else:
+                print(f"正在尝试本地 USB 连接至序列号: {input_str}")
+                return Swabian.TimeTagger.createTimeTagger(input_str)
+
         try:
-            self.ttA = Swabian.TimeTagger.createTimeTagger(serial_a) if serial_a else None
-            self.ttB = Swabian.TimeTagger.createTimeTagger(serial_b) if serial_b else None
+            self.ttA = create_tagger(serial_a)
+            self.ttB = create_tagger(serial_b)
+
+            # 设置外部 10MHz 时钟源，使两台 TDC 锁频到同一参考
+            # 若硬件未接参考信号则打印警告，不中断初始化
+            for tagger, name in [(self.ttA, 'TDC A'), (self.ttB, 'TDC B')]:
+                if tagger is None:
+                    continue
+                try:
+                    tagger.setClockSource(Swabian.TimeTagger.ClockSource.External10MHz)
+                    print(f"[{name}] 时钟源已切换至 External 10MHz")
+                except Exception as clk_err:
+                    print(f"[{name}] 警告：无法切换至外部 10MHz 时钟（将使用内部晶振）: {clk_err}")
+
             return True, "Initialized TimeTaggers"
         except Exception as e:
             return False, str(e)
@@ -79,6 +102,8 @@ class ExperimentWorker(QtCore.QThread):
         self.search_request_idx = None
         self.search_thresh = 5
         self.save_dir = r"E:\lzy"
+        # PPS 同步超时：超过此时间未检测到 1PPS 则自动放弃对准，以 offset=0 继续运行
+        self.pps_sync_timeout_s = 10.0
 
         self.buf_A = deque()
         self.buf_B = deque()
@@ -189,13 +214,32 @@ class ExperimentWorker(QtCore.QThread):
                         self.pps_offset_B = tsB_raw[np.where(chB_raw == CH_PPS)[0][0]]
 
                     if self.pps_offset_A is not None and self.pps_offset_B is not None:
+                        # 两路 PPS 均已检测到，完成对准
+                        self.is_synced = True
+                        self.start_time = time.time()
+                        self.buf_A.clear()
+                        self.buf_B.clear()
+                    elif now - self.start_time > self.pps_sync_timeout_s:
+                        # 超时仍未检测到 PPS —— 回退到无对准模式继续运行
+                        # 两台 TDC 的时钟零点不对齐，会引入固定偏移误差，但不影响软件运行
+                        missing = []
+                        if self.pps_offset_A is None: missing.append('TDC A')
+                        if self.pps_offset_B is None: missing.append('TDC B')
+                        print(f"[PPS] 同步超时（{self.pps_sync_timeout_s}s），"
+                              f"以下设备未检测到 1PPS 信号: {', '.join(missing)}。"
+                              f"将以 offset=0 继续运行（时间戳绝对误差增大，相对精度不受影响）。")
+                        if self.pps_offset_A is None: self.pps_offset_A = 0
+                        if self.pps_offset_B is None: self.pps_offset_B = 0
                         self.is_synced = True
                         self.start_time = time.time()
                         self.buf_A.clear()
                         self.buf_B.clear()
                     else:
+                        elapsed_sync = now - self.start_time
                         if now - last_ui_update > 0.25:
-                            self._emit_status("Syncing PPS...", 0, None, None)
+                            self._emit_status(
+                                f"Syncing PPS... ({elapsed_sync:.0f}s / {self.pps_sync_timeout_s:.0f}s)",
+                                0, None, None)
                             last_ui_update = now
                         time.sleep(0.002)
                         continue
@@ -418,14 +462,16 @@ class MainWindow(QtWidgets.QMainWindow):
         gb_dev = QtWidgets.QGroupBox("DEVICE SETUP")
         v_dev = QtWidgets.QVBoxLayout()
         h_devA = QtWidgets.QHBoxLayout()
-        h_devA.addWidget(QtWidgets.QLabel("TDC A Serial:"))
-        self.le_serialA = QtWidgets.QLineEdit("225000138V")
+        h_devA.addWidget(QtWidgets.QLabel("TDC A (Serial/IP):"))
+        self.le_serialA = QtWidgets.QLineEdit("192.168.1.100:4444")
+        self.le_serialA.setPlaceholderText("e.g. 225000138V or 192.168.1.100:4444")
         h_devA.addWidget(self.le_serialA)
         v_dev.addLayout(h_devA)
         
         h_devB = QtWidgets.QHBoxLayout()
-        h_devB.addWidget(QtWidgets.QLabel("TDC B Serial:"))
+        h_devB.addWidget(QtWidgets.QLabel("TDC B (Serial/IP):"))
         self.le_serialB = QtWidgets.QLineEdit("22440012ZN")
+        self.le_serialB.setPlaceholderText("e.g. 22440012ZN or localhost:4444")
         h_devB.addWidget(self.le_serialB)
         v_dev.addLayout(h_devB)
         
