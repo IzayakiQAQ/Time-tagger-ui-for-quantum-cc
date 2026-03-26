@@ -1,32 +1,27 @@
 # WORK_PLAN.md
 
 ## Current Objective
-检查并修复 `WLAN_NodeB_Central_UI.py` 中的连接逻辑。目前代码使用的是 `createTimeTagger(serial)`，这通常用于本地 USB 连接，需要修改以支持通过 IP:Port 连接到远程 Transmitter。
+1. 诊断并解决 WLAN 分布式系统中“能连接、能操作，但收不到时间戳数据”的问题。
+2. 确认是网络数据平面（Firewall/Port）阻塞还是软件同步逻辑（Synchronizer/Manual Merge）问题。
 
 ---
 
 ## Diagnosis / Analysis
-1. **现状**：`HardwareInterface.initialize` 中直接调用 `Swabian.TimeTagger.createTimeTagger(serial_a)`。
-2. **问题**：如果 `serial_a` 是一个 IP 地址（例如 `192.168.1.100:4444`），普通的 `createTimeTagger` 可能无法正确识别为网络连接，或者在某些版本中需要显式调用 `createTimeTaggerNetwork`。
-3. **需求**：发射端 `NodeA_Transmitter.py` 使用了 `tagger.startServer(4444)`，接收端（UI端）必须能够连接到这个地址。
+- **现象描述**：能够通过 IP:Port 连接，能够执行 `setClockSource` 等控制指令（代表 RPC 控制平面正常），但计数器（Counter）和时间戳流（Stream）返回空数据（代表数据平面异常）。
+- **可能原因 1：防火墙拦截数据端口**。Swabian Server 除了 4444 控制端口，数据传输会使用动态端口。若防火墙仅开启 4444，会导致“看得见连不上数据”。
+- **可能原因 2：流订阅未生效**。在网络模式下，`TimeTagStream` 有时需要显式的 `start()` 以及确保服务端有物理信号触发。
+- **可能原因 3：同步逻辑阻塞**。`WLAN_NodeB_Central_UI.py` 目前采用 Python 手动对齐 PPS。如果 Node A 没数据，循环会一直卡在 `Syncing PPS...`。
+- **可能原因 4：用户误解了 ttbin**。UI 目前仅保存 `.txt` 格式的直方图。如果是指官方 GUI 连接服务器看不到数据，则基本确定是防火墙或硬件问题。
 
 ---
 
-## Proposed Code Changes
-
-### 文件：`WLAN_NodeB_Central_UI.py`
-
-#### 1. 修改 `HardwareInterface.initialize()`
-- 增加逻辑：判断输入的字符串是否包含 `:`（IP:Port 格式）。
-- 如果包含 `:`，调用 `Swabian.TimeTagger.createTimeTaggerNetwork(address)`。
-- 如果不包含，保持 `Swabian.TimeTagger.createTimeTagger(serial)`。
-
-#### 2. 更新 UI 默认值和标签
-- 将 UI 上的 "Serial" 标签改为 "Serial / IP:Port"。
-- 默认值可以设为一个示例 IP，方便用户测试。
+## Proposed Changes
+1. **测试脚本**：编写一个简单的 `debug_network_data.py` 让用户在 Node B 上运行，跳过 UI 逻辑，直接测试 `Counter` 是否有数。
+2. **防火墙配置指导**：要求用户暂时关闭 Node A 的防火墙进行测试，或将 `TimeTagger.exe` / `Python.exe` 加入白名单。
+3. **优化 UI 连接逻辑**：在 UI 打印中增加“正在检测数据流...”的探测环节。
 
 ---
 
 ## Results
-- [x] 分析完成：确认当前代码确实缺乏显式的网络连接逻辑。
-- [ ] 代码修改完成。
+- [x] 诊断脚本已生成。
+- [ ] 修复建议已发送。

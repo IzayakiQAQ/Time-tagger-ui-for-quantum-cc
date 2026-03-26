@@ -49,6 +49,15 @@ class HardwareInterface:
         try:
             self.ttA = Swabian.TimeTagger.createTimeTagger(serial_a) if serial_a else None
             self.ttB = Swabian.TimeTagger.createTimeTagger(serial_b) if serial_b else None
+            # Best-effort: switch to external 10MHz if available. If not wired, keep internal oscillator.
+            for tagger, name in [(self.ttA, 'TDC A'), (self.ttB, 'TDC B')]:
+                if tagger is None:
+                    continue
+                try:
+                    tagger.setClockSource(Swabian.TimeTagger.ClockSource.External10MHz)
+                    print(f"[{name}] 时钟源已切换至 External 10MHz")
+                except Exception as clk_err:
+                    print(f"[{name}] 警告：无法切换至外部 10MHz 时钟（将使用内部晶振）: {clk_err}")
             return True, "Initialized TimeTaggers"
         except Exception as e:
             return False, str(e)
@@ -79,6 +88,8 @@ class ExperimentWorker(QtCore.QThread):
         self.search_request_idx = None
         self.search_thresh = 5
         self.save_dir = r"E:\lzy"
+        # PPS 同步超时：超过此时间未检测到 1PPS 则自动放弃对准，以 offset=0 继续运行
+        self.pps_sync_timeout_s = 10.0
 
         self.buf_A = deque()
         self.buf_B = deque()
@@ -166,91 +177,110 @@ class ExperimentWorker(QtCore.QThread):
         self.start_time = time.time()
         last_ui_update = time.time()
 
-        while self.running:
-            now = time.time()
-            tsA_raw, chA_raw = np.array([]), np.array([])
-            tsB_raw, chB_raw = np.array([]), np.array([])
-            
-            if streamA:
-                dataA = streamA.getData()
-                tsA_raw = dataA.getTimestamps()
-                chA_raw = dataA.getChannels()
+        try:
+            while self.running:
+                now = time.time()
+                tsA_raw, chA_raw = np.array([]), np.array([])
+                tsB_raw, chB_raw = np.array([]), np.array([])
+                
+                if streamA:
+                    dataA = streamA.getData()
+                    tsA_raw = dataA.getTimestamps()
+                    chA_raw = dataA.getChannels()
 
-            if streamB:
-                dataB = streamB.getData()
-                tsB_raw = dataB.getTimestamps()
-                chB_raw = dataB.getChannels()
+                if streamB:
+                    dataB = streamB.getData()
+                    tsB_raw = dataB.getTimestamps()
+                    chB_raw = dataB.getChannels()
 
-            if not self.is_synced:
-                if need_pps_sync and streamA and streamB:
-                    if self.pps_offset_A is None and CH_PPS in chA_raw:
-                        self.pps_offset_A = tsA_raw[np.where(chA_raw == CH_PPS)[0][0]]
-                    if self.pps_offset_B is None and CH_PPS in chB_raw:
-                        self.pps_offset_B = tsB_raw[np.where(chB_raw == CH_PPS)[0][0]]
+                if not self.is_synced:
+                    if need_pps_sync and streamA and streamB:
+                        if self.pps_offset_A is None and CH_PPS in chA_raw:
+                            self.pps_offset_A = tsA_raw[np.where(chA_raw == CH_PPS)[0][0]]
+                        if self.pps_offset_B is None and CH_PPS in chB_raw:
+                            self.pps_offset_B = tsB_raw[np.where(chB_raw == CH_PPS)[0][0]]
 
-                    if self.pps_offset_A is not None and self.pps_offset_B is not None:
+                        if self.pps_offset_A is not None and self.pps_offset_B is not None:
+                            self.is_synced = True
+                            self.start_time = time.time()
+                            self.buf_A.clear()
+                            self.buf_B.clear()
+                        elif now - self.start_time > self.pps_sync_timeout_s:
+                            missing = []
+                            if self.pps_offset_A is None: missing.append('TDC A')
+                            if self.pps_offset_B is None: missing.append('TDC B')
+                            print(
+                                f"[PPS] 同步超时（{self.pps_sync_timeout_s}s），"
+                                f"以下设备未检测到 1PPS 信号: {', '.join(missing)}。"
+                                f"将以 offset=0 继续运行（时间戳绝对误差增大，相对精度不受影响）。"
+                            )
+                            if self.pps_offset_A is None: self.pps_offset_A = 0
+                            if self.pps_offset_B is None: self.pps_offset_B = 0
+                            self.is_synced = True
+                            self.start_time = time.time()
+                            self.buf_A.clear()
+                            self.buf_B.clear()
+                        else:
+                            elapsed_sync = now - self.start_time
+                            if now - last_ui_update > 0.25:
+                                self._emit_status(
+                                    f"Syncing PPS... ({elapsed_sync:.0f}s / {self.pps_sync_timeout_s:.0f}s)",
+                                    0, None, None)
+                                last_ui_update = now
+                            time.sleep(0.002)
+                            continue
+                    else:
+                        self.pps_offset_A = 0
+                        self.pps_offset_B = 0
                         self.is_synced = True
                         self.start_time = time.time()
                         self.buf_A.clear()
                         self.buf_B.clear()
+
+                if len(tsA_raw) > 0: self.buf_A.append((tsA_raw - self.pps_offset_A, chA_raw))
+                if len(tsB_raw) > 0: self.buf_B.append((tsB_raw - self.pps_offset_B, chB_raw))
+
+                if self.search_request_idx is not None:
+                    total_ev = sum(len(x[0]) for x in self.buf_A) + sum(len(x[0]) for x in self.buf_B)
+                    if total_ev > 20000:
+                        self._perform_auto_search(self.search_request_idx)
+                        self.search_request_idx = None
                     else:
-                        if now - last_ui_update > 0.25:
-                            self._emit_status("Syncing PPS...", 0, None, None)
-                            last_ui_update = now
                         time.sleep(0.002)
                         continue
                 else:
-                    self.pps_offset_A = 0
-                    self.pps_offset_B = 0
-                    self.is_synced = True
-                    self.start_time = time.time()
-                    self.buf_A.clear()
-                    self.buf_B.clear()
+                    self._process_all_links()
 
-            if len(tsA_raw) > 0: self.buf_A.append((tsA_raw - self.pps_offset_A, chA_raw))
-            if len(tsB_raw) > 0: self.buf_B.append((tsB_raw - self.pps_offset_B, chB_raw))
+                elapsed = now - self.start_time
+                progress = min(100, int((elapsed / self.duration) * 100))
 
-            if self.search_request_idx is not None:
-                total_ev = sum(len(x[0]) for x in self.buf_A) + sum(len(x[0]) for x in self.buf_B)
-                if total_ev > 20000:
-                    self._perform_auto_search(self.search_request_idx)
-                    self.search_request_idx = None
-                else:
-                    time.sleep(0.002)
-                    continue
-            else:
-                self._process_all_links()
+                if now - last_ui_update > 0.25:
+                    h1 = self.hist_acc_1.copy() if self.hist_acc_1 is not None else None
+                    h2 = self.hist_acc_2.copy() if self.hist_acc_2 is not None else None
+                    self._emit_status(f"Cycle {self.current_cycle}", progress, h1, h2)
+                    last_ui_update = now
 
-            elapsed = now - self.start_time
-            progress = min(100, int((elapsed / self.duration) * 100))
+                if self.mode != 'free' and elapsed >= self.duration:
+                    ts_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                    save_d = self.save_dir
+                    self.cycle_finished.emit(self.current_cycle,
+                                             self.hist_acc_1.copy(),
+                                             self.hist_acc_2.copy(),
+                                             self.duration, ts_str)
 
-            if now - last_ui_update > 0.25:
-                h1 = self.hist_acc_1.copy() if self.hist_acc_1 is not None else None
-                h2 = self.hist_acc_2.copy() if self.hist_acc_2 is not None else None
-                self._emit_status(f"Cycle {self.current_cycle}", progress, h1, h2)
-                last_ui_update = now
+                    if self.mode == 'single' or (self.mode == 'repeat' and self.current_cycle >= self.cycles):
+                        self.running = False
+                        self.acq_finished.emit()
+                    else:
+                        self.current_cycle += 1
+                        self.start_time = time.time()
+                        self.hist_acc_1.fill(0)
+                        self.hist_acc_2.fill(0)
 
-            if self.mode != 'free' and elapsed >= self.duration:
-                ts_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                save_d = self.save_dir
-                self.cycle_finished.emit(self.current_cycle,
-                                         self.hist_acc_1.copy(),
-                                         self.hist_acc_2.copy(),
-                                         self.duration, ts_str)
-
-                if self.mode == 'single' or (self.mode == 'repeat' and self.current_cycle >= self.cycles):
-                    self.running = False
-                    self.acq_finished.emit()
-                else:
-                    self.current_cycle += 1
-                    self.start_time = time.time()
-                    self.hist_acc_1.fill(0)
-                    self.hist_acc_2.fill(0)
-
-            time.sleep(0.001)
-
-        if streamA: streamA.stop()
-        if streamB: streamB.stop()
+                time.sleep(0.001)
+        finally:
+            if streamA: streamA.stop()
+            if streamB: streamB.stop()
 
     def _merge(self, buf):
         if not buf: return np.array([]), np.array([])
@@ -751,6 +781,16 @@ class MainWindow(QtWidgets.QMainWindow):
     def closeEvent(self, e):
         self.worker.stop_acquisition()
         self.worker.wait()
+        # Release hardware handles to avoid leaving devices locked after UI exit.
+        try:
+            if getattr(hw, "ttA", None):
+                Swabian.TimeTagger.freeTimeTagger(hw.ttA)
+                hw.ttA = None
+            if getattr(hw, "ttB", None):
+                Swabian.TimeTagger.freeTimeTagger(hw.ttB)
+                hw.ttB = None
+        except Exception:
+            pass
         e.accept()
 
 if __name__ == "__main__":

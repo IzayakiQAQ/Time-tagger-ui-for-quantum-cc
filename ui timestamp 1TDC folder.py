@@ -45,6 +45,12 @@ class HardwareInterface:
         if Swabian.TimeTagger is None: return False, "TimeTagger Library Missing"
         try:
             self.tt = Swabian.TimeTagger.createTimeTagger(SERIAL_NUMBER)
+            # Best-effort: switch to external 10MHz if available. If not wired, keep internal oscillator.
+            try:
+                self.tt.setClockSource(Swabian.TimeTagger.ClockSource.External10MHz)
+                print("[TDC] 时钟源已切换至 External 10MHz")
+            except Exception as clk_err:
+                print(f"[TDC] 警告：无法切换至外部 10MHz 时钟（将使用内部晶振）: {clk_err}")
             return True, f"TDC Connected: {SERIAL_NUMBER}"
         except Exception as e:
             return False, str(e)
@@ -108,62 +114,64 @@ class ExperimentWorker(QtCore.QThread):
         self.current_cycle = 1
         last_ui = time.time()
 
-        while self.running:
-            now = time.time()
-            data = stream.getData()
-            ts, ch = data.getTimestamps(), data.getChannels()
-            if len(ts) > 0: self.buf.append((ts, ch))
+        try:
+            while self.running:
+                now = time.time()
+                data = stream.getData()
+                ts, ch = data.getTimestamps(), data.getChannels()
+                if len(ts) > 0: self.buf.append((ts, ch))
 
-            if self.search_request_idx is not None:
-                total_ev = sum(len(x[0]) for x in self.buf)
-                if total_ev > 20000:
-                    self._perform_wide_search(self.search_request_idx)
-                    self.search_request_idx = None
+                if self.search_request_idx is not None:
+                    total_ev = sum(len(x[0]) for x in self.buf)
+                    if total_ev > 20000:
+                        self._perform_wide_search(self.search_request_idx)
+                        self.search_request_idx = None
+                    else:
+                        time.sleep(0.001)
+                        continue
                 else:
-                    time.sleep(0.001);
-                    continue
-            else:
-                self._process_histogram()
+                    self._process_histogram()
 
-            # UI Update
-            if now - last_ui > 0.1:
-                rates = []
-                if self.monitor:
-                    raw_rates = self.monitor.getData()
-                    rates = [(raw_rates[i][0] / self.integ_time_s) / 1000.0 for i in range(4)]
-                elapsed = now - self.start_time
-                prog = 100 if self.mode == 'free' else int((elapsed / self.duration) * 100)
+                # UI Update
+                if now - last_ui > 0.1:
+                    rates = []
+                    if self.monitor:
+                        raw_rates = self.monitor.getData()
+                        rates = [(raw_rates[i][0] / self.integ_time_s) / 1000.0 for i in range(4)]
+                    elapsed = now - self.start_time
+                    prog = 100 if self.mode == 'free' else int((elapsed / self.duration) * 100)
 
-                status_str = f"Cycle {self.current_cycle}"
-                if self.mode == 'repeat':
-                    status_str += f" / {self.max_cycles}"
+                    status_str = f"Cycle {self.current_cycle}"
+                    if self.mode == 'repeat':
+                        status_str += f" / {self.max_cycles}"
 
-                self.status_update.emit(self.hist_acc_1.copy(), self.hist_acc_2.copy(), rates,
-                                        status_str, min(100, prog))
-                last_ui = now
+                    self.status_update.emit(self.hist_acc_1.copy(), self.hist_acc_2.copy(), rates,
+                                            status_str, min(100, prog))
+                    last_ui = now
 
-            # Cycle Check Logic
-            if self.mode != 'free' and (now - self.start_time) >= self.duration:
-                self.cycle_finished.emit(self.current_cycle, self.hist_acc_1.copy(), self.hist_acc_2.copy(),
-                                         self.duration)
+                # Cycle Check Logic
+                if self.mode != 'free' and (now - self.start_time) >= self.duration:
+                    self.cycle_finished.emit(self.current_cycle, self.hist_acc_1.copy(), self.hist_acc_2.copy(),
+                                             self.duration)
 
-                should_stop = False
-                if self.mode == 'single':
-                    should_stop = True
-                elif self.mode == 'repeat' and self.current_cycle >= self.max_cycles:
-                    should_stop = True
+                    should_stop = False
+                    if self.mode == 'single':
+                        should_stop = True
+                    elif self.mode == 'repeat' and self.current_cycle >= self.max_cycles:
+                        should_stop = True
 
-                if should_stop:
-                    self.running = False
-                    self.acq_finished.emit()
-                else:
-                    self.current_cycle += 1
-                    self.start_time = time.time()
-                    self.hist_acc_1.fill(0)
-                    self.hist_acc_2.fill(0)
+                    if should_stop:
+                        self.running = False
+                        self.acq_finished.emit()
+                    else:
+                        self.current_cycle += 1
+                        self.start_time = time.time()
+                        self.hist_acc_1.fill(0)
+                        self.hist_acc_2.fill(0)
 
-            time.sleep(0.001)
-        stream.stop()
+                time.sleep(0.001)
+        finally:
+            stream.stop()
 
     def _merge_buf(self):
         if not self.buf: return np.array([]), np.array([])
@@ -507,6 +515,13 @@ class MainWindow(QtWidgets.QMainWindow):
     def closeEvent(self, e):
         self.worker.running = False;
         self.worker.wait();
+        # Release hardware handles to avoid leaving device locked after UI exit.
+        try:
+            if getattr(hw, "tt", None):
+                Swabian.TimeTagger.freeTimeTagger(hw.tt)
+                hw.tt = None
+        except Exception:
+            pass
         e.accept()
 
 
