@@ -11,7 +11,7 @@ import threading
 
 # ================== 配置与常量 ==================
 SERIAL_NUMBER = "22440012ZN"
-DEFAULT_SAVE_DIR = r"E:\lzy\2026"
+DEFAULT_SAVE_DIR = r"E:\lzy\demo\data\raw\single_tdc"
 
 try:
     import Swabian.TimeTagger

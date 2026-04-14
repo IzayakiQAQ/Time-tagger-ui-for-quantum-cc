@@ -7,8 +7,8 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from tqdm import tqdm
 
 # ================= 配置区域 =================
-INPUT_DIR = r"E:\lzy\2026.3.5 0km 2m单边"
-OUTPUT_DIR = r"E:\lzy\2026.3.5 0km 2m单边_Merged"
+INPUT_DIR = r"E:\lzy\demo\data\raw\merge_input"
+OUTPUT_DIR = r"E:\lzy\demo\data\processed\merge_output"
 
 # 每多少个文件合并成1组
 GROUP_SIZE = 10

@@ -199,7 +199,7 @@ collection_time_entry.place(x=215, y=448, width=60, height=38)
 
 save_dir_label = tk.Label(window, text='保存路径：', font=('Arial', 12), width=12, height=2)
 save_dir_label.place(x=11, y=520)
-save_dir_entry = tk.Entry(window, textvariable=tk.StringVar(value=r'E:\lzy\娴嬭瘯缁撴灉\鍏夋簮\骞叉秹'), font=('Arial', 12), bd=2,
+save_dir_entry = tk.Entry(window, textvariable=tk.StringVar(value=r'E:\lzy\demo\data\raw\franson'), font=('Arial', 12), bd=2,
                           relief="groove")
 save_dir_entry.place(x=158, y=526, width=690, height=38)
 

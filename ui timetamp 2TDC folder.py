@@ -87,7 +87,7 @@ class ExperimentWorker(QtCore.QThread):
         self.is_synced = False
         self.search_request_idx = None
         self.search_thresh = 5
-        self.save_dir = r"E:\lzy"
+        self.save_dir = r"E:\lzy\demo\data\raw\dual_tdc"
         # PPS 同步超时：超过此时间未检测到 1PPS 则自动放弃对准，以 offset=0 继续运行
         self.pps_sync_timeout_s = 10.0
 
@@ -562,7 +562,7 @@ class MainWindow(QtWidgets.QMainWindow):
         v_acq = QtWidgets.QVBoxLayout()
         
         h_save = QtWidgets.QHBoxLayout()
-        self.le_save_dir = QtWidgets.QLineEdit(r"E:\lzy\2025.12.16 2TDC test12h uitimetamp")
+        self.le_save_dir = QtWidgets.QLineEdit(r"E:\lzy\demo\data\raw\dual_tdc")
         btn_browse = QtWidgets.QPushButton("Browse")
         btn_browse.clicked.connect(self.browse_save_dir)
         h_save.addWidget(self.le_save_dir)

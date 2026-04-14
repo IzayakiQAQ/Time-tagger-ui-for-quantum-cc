@@ -174,7 +174,7 @@ def main() -> None:
     parser.add_argument(
         "run_dir",
         nargs="?",
-        default=r"E:\lzy\测试结果\光源\干涉\run_20260411_162807",
+        default=r"E:\lzy\demo\data\raw\franson\run_20260411_162807",
         help="Run directory containing manifest.csv",
     )
     parser.add_argument(

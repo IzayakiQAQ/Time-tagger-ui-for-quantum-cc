@@ -9,7 +9,7 @@ from tqdm import tqdm
 
 # ================= 配置区域 =================
 
-DATA_DIR = r"E:\lzy\2026.3.13 2000k 25km"
+DATA_DIR = r"E:\lzy\demo\data\processed\clock_diff_input"
 OUTPUT_FILENAME = "clock_diff_filled.csv"
 
 # 拟合参数
