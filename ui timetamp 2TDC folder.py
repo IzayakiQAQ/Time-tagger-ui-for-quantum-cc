@@ -101,6 +101,10 @@ class ExperimentWorker(QtCore.QThread):
         self.monitor_A = None
         self.monitor_B = None
         self.integ_time_s = 0.5
+        self.ttbin_save_enabled = False
+        self.ttbin_writers_A = {}
+        self.ttbin_writers_B = {}
+        self.ttbin_cycle_label = None
 
     def update_link_config(self, link_idx, start_dev, start_ch, stop_dev, stop_ch, manual_offset_ns):
         with self.config_lock:
@@ -127,6 +131,80 @@ class ExperimentWorker(QtCore.QThread):
     def trigger_auto_search(self, link_idx):
         self.search_request_idx = link_idx
 
+    def set_ttbin_save_enabled(self, enabled):
+        with self.config_lock:
+            self.ttbin_save_enabled = bool(enabled)
+        if not enabled:
+            self._stop_ttbin_writers()
+
+    def _ttbin_base_dir(self):
+        ttbin_dir = os.path.join(self.save_dir, "ttbin")
+        os.makedirs(ttbin_dir, exist_ok=True)
+        return ttbin_dir
+
+    def _ttbin_file_path(self, device_prefix, channel):
+        if self.ttbin_cycle_label is None:
+            self.ttbin_cycle_label = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        return os.path.join(
+            self._ttbin_base_dir(),
+            f"Cycle_{self.current_cycle:03d}_{device_prefix}_CH{channel}_{self.ttbin_cycle_label}.ttbin"
+        )
+
+    def _sync_ttbin_writers(self, channels_A, channels_B):
+        with self.config_lock:
+            enabled = self.ttbin_save_enabled
+
+        if not enabled:
+            self._stop_ttbin_writers()
+            return
+
+        if hw.ttA and not self.ttbin_writers_A and channels_A:
+            try:
+                try:
+                    record_channels_A = list(hw.ttA.getChannelList())
+                except Exception:
+                    record_channels_A = list(channels_A)
+                if not record_channels_A:
+                    record_channels_A = list(channels_A)
+                for channel in sorted(set(record_channels_A)):
+                    self.ttbin_writers_A[channel] = Swabian.TimeTagger.FileWriter(
+                        hw.ttA, self._ttbin_file_path("TDCA", channel), [channel]
+                    )
+            except Exception as e:
+                print(f"Failed to start TDC A ttbin writer: {e}")
+                self.ttbin_writers_A.clear()
+
+        if hw.ttB and not self.ttbin_writers_B and channels_B:
+            try:
+                try:
+                    record_channels_B = list(hw.ttB.getChannelList())
+                except Exception:
+                    record_channels_B = list(channels_B)
+                if not record_channels_B:
+                    record_channels_B = list(channels_B)
+                for channel in sorted(set(record_channels_B)):
+                    self.ttbin_writers_B[channel] = Swabian.TimeTagger.FileWriter(
+                        hw.ttB, self._ttbin_file_path("TDCB", channel), [channel]
+                    )
+            except Exception as e:
+                print(f"Failed to start TDC B ttbin writer: {e}")
+                self.ttbin_writers_B.clear()
+
+        if (hw.ttA and channels_A and not self.ttbin_writers_A) or (hw.ttB and channels_B and not self.ttbin_writers_B):
+            with self.config_lock:
+                self.ttbin_save_enabled = False
+            self._stop_ttbin_writers()
+
+    def _stop_ttbin_writers(self):
+        for device_name, writers in [("TDCA", self.ttbin_writers_A), ("TDCB", self.ttbin_writers_B)]:
+            for channel, writer in list(writers.items()):
+                try:
+                    writer.stop()
+                except Exception as e:
+                    print(f"Failed to stop {device_name} CH{channel} ttbin writer: {e}")
+            writers.clear()
+        self.ttbin_cycle_label = None
+
     def start_acquisition(self, mode, duration, cycles, save_dir, search_thresh):
         self.mode = mode
         self.duration = duration
@@ -141,6 +219,7 @@ class ExperimentWorker(QtCore.QThread):
         self.pps_offset_B = None
         self.buf_A.clear()
         self.buf_B.clear()
+        self._stop_ttbin_writers()
         if self.hist_acc_1 is not None: self.hist_acc_1.fill(0)
         if self.hist_acc_2 is not None: self.hist_acc_2.fill(0)
         self.start()
@@ -176,10 +255,12 @@ class ExperimentWorker(QtCore.QThread):
 
         self.start_time = time.time()
         last_ui_update = time.time()
+        self._sync_ttbin_writers(list(ch_set_A), list(ch_set_B))
 
         try:
             while self.running:
                 now = time.time()
+                self._sync_ttbin_writers(list(ch_set_A), list(ch_set_B))
                 tsA_raw, chA_raw = np.array([]), np.array([])
                 tsB_raw, chB_raw = np.array([]), np.array([])
                 
@@ -262,7 +343,7 @@ class ExperimentWorker(QtCore.QThread):
 
                 if self.mode != 'free' and elapsed >= self.duration:
                     ts_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                    save_d = self.save_dir
+                    self._stop_ttbin_writers()
                     self.cycle_finished.emit(self.current_cycle,
                                              self.hist_acc_1.copy(),
                                              self.hist_acc_2.copy(),
@@ -276,9 +357,11 @@ class ExperimentWorker(QtCore.QThread):
                         self.start_time = time.time()
                         self.hist_acc_1.fill(0)
                         self.hist_acc_2.fill(0)
+                        self._sync_ttbin_writers(list(ch_set_A), list(ch_set_B))
 
                 time.sleep(0.001)
         finally:
+            self._stop_ttbin_writers()
             if streamA: streamA.stop()
             if streamB: streamB.stop()
 
@@ -509,6 +592,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.btn_start.setEnabled(False)
         v_acq.addWidget(self.btn_start)
 
+        self.btn_ttbin_save = QtWidgets.QPushButton("TTBIN Save: OFF")
+        self.btn_ttbin_save.setCheckable(True)
+        self.btn_ttbin_save.clicked.connect(self.toggle_ttbin_save)
+        self.btn_ttbin_save.setEnabled(False)
+        v_acq.addWidget(self.btn_ttbin_save)
+
         self.lbl_status = QtWidgets.QLabel("Ready (Please Connect Devices)")
         self.lbl_status.setAlignment(QtCore.Qt.AlignCenter)
         v_acq.addWidget(self.lbl_status)
@@ -600,6 +689,7 @@ class MainWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.information(self, "Connected", "Devices initialized successfully.")
             self.lbl_status.setText("Ready")
             self.btn_start.setEnabled(True)
+            self.btn_ttbin_save.setEnabled(True)
             self.apply_config()
 
     def browse_save_dir(self):
@@ -689,10 +779,15 @@ class MainWindow(QtWidgets.QMainWindow):
         else:
             self.apply_config()
             mode = 'free' if self.rb_free.isChecked() else ('single' if self.rb_single.isChecked() else 'repeat')
+            self.worker.set_ttbin_save_enabled(self.btn_ttbin_save.isChecked())
             self.worker.start_acquisition(mode, self.sb_dur.value(), self.sb_cyc.value(), self.le_save_dir.text(), self.sb_search_thresh.value())
             self.btn_start.setText("STOP")
             self.btn_start.setObjectName("btn_stop")
             self.btn_start.setStyle(self.btn_start.style())
+
+    def toggle_ttbin_save(self, checked):
+        self.btn_ttbin_save.setText(f"TTBIN Save: {'ON' if checked else 'OFF'}")
+        self.worker.set_ttbin_save_enabled(checked)
 
     def do_auto_search(self, idx_1based):
         if not self.worker.running:

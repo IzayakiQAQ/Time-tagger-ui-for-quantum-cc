@@ -83,6 +83,10 @@ class ExperimentWorker(QtCore.QThread):
         self.hist_acc_1 = np.zeros(1)
         self.hist_acc_2 = np.zeros(1)
         self.search_request_idx = None
+        self.ttbin_save_enabled = False
+        self.ttbin_writers = {}
+        self.ttbin_cycle_label = None
+        self.save_dir = DEFAULT_SAVE_DIR
 
     def setup_global(self, bin_ps, win_ps):
         self.bin_ps, self.window_ps = int(bin_ps), int(win_ps)
@@ -96,6 +100,56 @@ class ExperimentWorker(QtCore.QThread):
 
     def trigger_auto_search(self, link_idx):
         self.search_request_idx = link_idx
+
+    def set_ttbin_save_enabled(self, enabled):
+        with self.config_lock:
+            self.ttbin_save_enabled = bool(enabled)
+        if not enabled:
+            self._stop_ttbin_writers()
+
+    def _ttbin_base_path(self, channel):
+        if self.ttbin_cycle_label is None:
+            self.ttbin_cycle_label = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        ttbin_dir = os.path.join(self.save_dir, "ttbin")
+        os.makedirs(ttbin_dir, exist_ok=True)
+        return os.path.join(
+            ttbin_dir,
+            f"Cycle_{self.current_cycle:03d}_CH{channel}_{self.ttbin_cycle_label}.ttbin"
+        )
+
+    def _sync_ttbin_writers(self, channels):
+        with self.config_lock:
+            enabled = self.ttbin_save_enabled
+        if not enabled:
+            self._stop_ttbin_writers()
+            return
+
+        if not self.ttbin_writers:
+            try:
+                try:
+                    record_channels = list(hw.tt.getChannelList())
+                except Exception:
+                    record_channels = list(channels)
+                if not record_channels:
+                    record_channels = list(channels)
+                for channel in sorted(set(record_channels)):
+                    self.ttbin_writers[channel] = Swabian.TimeTagger.FileWriter(
+                        hw.tt, self._ttbin_base_path(channel), [channel]
+                    )
+            except Exception as e:
+                print(f"Failed to start ttbin writer: {e}")
+                with self.config_lock:
+                    self.ttbin_save_enabled = False
+                self._stop_ttbin_writers()
+
+    def _stop_ttbin_writers(self):
+        for channel, writer in list(self.ttbin_writers.items()):
+            try:
+                writer.stop()
+            except Exception as e:
+                print(f"Failed to stop CH{channel} ttbin writer: {e}")
+        self.ttbin_writers.clear()
+        self.ttbin_cycle_label = None
 
     def run(self):
         if not hw.tt: return
@@ -113,13 +167,16 @@ class ExperimentWorker(QtCore.QThread):
         self.start_time = time.time()
         self.current_cycle = 1
         last_ui = time.time()
+        self._sync_ttbin_writers(list(ch_list))
 
         try:
             while self.running:
                 now = time.time()
+                self._sync_ttbin_writers(list(ch_list))
                 data = stream.getData()
                 ts, ch = data.getTimestamps(), data.getChannels()
-                if len(ts) > 0: self.buf.append((ts, ch))
+                if len(ts) > 0:
+                    self.buf.append((ts, ch))
 
                 if self.search_request_idx is not None:
                     total_ev = sum(len(x[0]) for x in self.buf)
@@ -151,6 +208,7 @@ class ExperimentWorker(QtCore.QThread):
 
                 # Cycle Check Logic
                 if self.mode != 'free' and (now - self.start_time) >= self.duration:
+                    self._stop_ttbin_writers()
                     self.cycle_finished.emit(self.current_cycle, self.hist_acc_1.copy(), self.hist_acc_2.copy(),
                                              self.duration)
 
@@ -168,9 +226,11 @@ class ExperimentWorker(QtCore.QThread):
                         self.start_time = time.time()
                         self.hist_acc_1.fill(0)
                         self.hist_acc_2.fill(0)
+                        self._sync_ttbin_writers(list(ch_list))
 
                 time.sleep(0.001)
         finally:
+            self._stop_ttbin_writers()
             stream.stop()
 
     def _merge_buf(self):
@@ -335,6 +395,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.btn_start.clicked.connect(self.toggle_start)
         v_ctrl.addWidget(self.btn_start)
 
+        self.btn_ttbin_save = QtWidgets.QPushButton("TTBIN Save: OFF")
+        self.btn_ttbin_save.setCheckable(True)
+        self.btn_ttbin_save.clicked.connect(self.toggle_ttbin_save)
+        v_ctrl.addWidget(self.btn_ttbin_save)
+
         self.lbl_status = QtWidgets.QLabel("Ready");
         v_ctrl.addWidget(self.lbl_status);
         self.bar = QtWidgets.QProgressBar();
@@ -454,10 +519,17 @@ class MainWindow(QtWidgets.QMainWindow):
             self.worker.duration = self.sb_dur.value();
             self.worker.max_cycles = self.sb_cyc.value()
             self.worker.peak_threshold = self.sb_threshold.value()
+            self.worker.save_dir = self.le_path.text().strip() or DEFAULT_SAVE_DIR
+            self.worker.set_ttbin_save_enabled(self.btn_ttbin_save.isChecked())
 
             self.worker.running = True;
             self.worker.start()
             self.btn_start.setText("STOP")
+
+    def toggle_ttbin_save(self, checked):
+        self.btn_ttbin_save.setText(f"TTBIN Save: {'ON' if checked else 'OFF'}")
+        self.worker.save_dir = self.le_path.text().strip() or DEFAULT_SAVE_DIR
+        self.worker.set_ttbin_save_enabled(checked)
 
     def update_ui(self, h1, h2, rates, msg, prog):
         self.lbl_status.setText(msg);
@@ -504,7 +576,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         fname1 = f"{cycle_str}_Link1_{ts}.txt"
         fname2 = f"{cycle_str}_Link2_{ts}.txt"
-        
+
         curr_x_copy = self.curr_x.copy() if self.curr_x is not None else None
         self.save_pool.submit(self._write_files, save_dir, fname1, fname2, curr_x_copy, h1, h2)
 
